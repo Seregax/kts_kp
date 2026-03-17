@@ -10,6 +10,7 @@ class Store:
     def __init__(self, app: Application) -> None:
         from app.store.bot.manager import BotManager
         from app.store.game.accessor import GameAccessor
+        from app.store.rabbit.callbacks import RabbitCallbackConsumer
         from app.store.rabbit.consumer import RabbitConsumer
         from app.store.rabbit.publisher import RabbitPublisher
 
@@ -17,3 +18,4 @@ class Store:
         self.publisher = RabbitPublisher(app)
         self.bot_manager = BotManager(app)
         self.consumer = RabbitConsumer(app)
+        self.callbacks = RabbitCallbackConsumer(app)

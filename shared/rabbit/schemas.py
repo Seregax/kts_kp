@@ -39,3 +39,14 @@ class OutgoingMessage(BaseModel):
     text: str
     keyboard: dict | None = None
     event_answer: EventAnswer | None = None
+    correlation_id: str | None = None
+    delete_cmid: int | None = None
+
+
+# --- vk_sent_callbacks queue (mailbox → game) ---
+
+
+class VkSentCallback(BaseModel):
+    correlation_id: str
+    peer_id: int
+    message_id: int

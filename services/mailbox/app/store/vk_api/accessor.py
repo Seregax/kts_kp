@@ -9,6 +9,7 @@ from typing import Any
 import aiohttp
 
 from shared.base.base_accessor import BaseAccessor
+from shared.rabbit.schemas import VkSentCallback
 
 if typing.TYPE_CHECKING:
     from aiohttp.web import Application
@@ -33,14 +34,14 @@ class VkApiAccessor(BaseAccessor):
         if self._session:
             await self._session.close()
 
-    async def _api_call(self, method: str, params: dict[str, Any]) -> dict:
+    async def _api_call(self, method: str, params: dict[str, Any]) -> Any:
         all_params = {
             "access_token": self.app.config.vk.token,
             "v": _VK_API_VERSION,
             **params,
         }
         async with self._session.get(
-            _VK_API_URL + method, params=all_params
+                _VK_API_URL + method, params=all_params
         ) as resp:
             data = await resp.json()
         if "error" in data:
@@ -51,15 +52,25 @@ class VkApiAccessor(BaseAccessor):
         return data["response"]
 
     async def send_message(self, msg: OutgoingMessage) -> None:
-        params: dict[str, Any] = {
-            "peer_id": msg.peer_id,
-            "message": msg.text,
-            "random_id": random.randint(0, 2**31),
-        }
-        if msg.keyboard is not None:
-            params["keyboard"] = json.dumps(msg.keyboard)
 
-        await self._api_call("messages.send", params)
+        if msg.text or msg.keyboard is not None:
+            params: dict[str, Any] = {
+                "peer_id": msg.peer_id,
+                "message": msg.text,
+                "random_id": random.randint(0, 2 ** 31),
+            }
+            if msg.keyboard is not None:
+                params["keyboard"] = json.dumps(msg.keyboard)
+            message_id: int = await self._api_call("messages.send", params)
+
+            if msg.correlation_id is not None:
+                await self.app.store.rabbit.publish_callback(
+                    VkSentCallback(
+                        correlation_id=msg.correlation_id,
+                        peer_id=msg.peer_id,
+                        message_id=message_id,
+                    )
+                )
 
         if msg.event_answer is not None:
             await self._api_call(
