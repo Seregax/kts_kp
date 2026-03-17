@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import typing
 from typing import Any
 
@@ -14,6 +15,8 @@ if typing.TYPE_CHECKING:
 _VK_API_URL = "https://api.vk.com/method/"
 _VK_API_VERSION = "5.131"
 
+logger = logging.getLogger(__name__)
+
 
 class VkApiAccessor(BaseAccessor):
     def __init__(self, app: Application) -> None:
@@ -25,7 +28,6 @@ class VkApiAccessor(BaseAccessor):
 
     async def connect(self, app: Application) -> None:
         self._session = aiohttp.ClientSession()
-        await self._get_long_poll_server()
 
     async def disconnect(self, app: Application) -> None:
         if self._session:
@@ -41,6 +43,11 @@ class VkApiAccessor(BaseAccessor):
             _VK_API_URL + method, params=all_params
         ) as resp:
             data = await resp.json()
+        if "error" in data:
+            raise RuntimeError(
+                f"VK API error {data['error']['error_code']}: "
+                f"{data['error']['error_msg']}"
+            )
         return data["response"]
 
     async def _get_long_poll_server(self) -> None:
@@ -53,6 +60,8 @@ class VkApiAccessor(BaseAccessor):
         self.ts = int(data["ts"])
 
     async def poll(self) -> None:
+        if self.server is None:
+            await self._get_long_poll_server()
         params = {
             "act": "a_check",
             "key": self.key,
