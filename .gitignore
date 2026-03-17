@@ -176,3 +176,5 @@ pyrightconfig.json
 # End of https://www.toptal.com/developers/gitignore/api/python
 
 .idea
+# Private config — use etc/config.yaml.example as template
+etc/config.yaml

@@ -1,0 +1,26 @@
+database:
+  host: localhost
+  port: 5432
+  user: postgres
+  password: postgres
+  database: kts_kp
+
+rabbit:
+  host: localhost
+  port: 5672
+  user: guest
+  password: guest
+
+vk:
+  token: "your_vk_community_token_here"
+  group_id: 123456789
+
+admin:
+  email: admin@example.com
+  password: changeme
+
+session:
+  key: "change-this-to-a-32-byte-secret!!"
+
+host: 0.0.0.0
+port: 8080
