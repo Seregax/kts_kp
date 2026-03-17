@@ -12,8 +12,8 @@ rabbit:
   password: guest
 
 vk:
-  token: ""
-  group_id: 0
+  token: "your_vk_community_token_here"
+  group_id: 123456789
 
 admin:
   email: admin@example.com

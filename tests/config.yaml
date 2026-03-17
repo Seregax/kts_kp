@@ -1,4 +1,13 @@
-debug: true
+database:
+  host: localhost
+  port: 5432
+  user: postgres
+  password: postgres
+  database: kts_kp_test
 
-security:
-  token: token
+admin:
+  email: test@example.com
+  password: testpass
+
+session:
+  key: "test-secret-key-32bytes-long!!!!"
