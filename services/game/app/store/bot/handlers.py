@@ -48,7 +48,6 @@ def _build_join_keyboard() -> dict:
 
 
 def _build_hit_stand_keyboard(round_id: int) -> dict:
-
     return {
         "inline": True,
         "buttons": [
@@ -550,7 +549,7 @@ class RoundHandler:
                 OutgoingMessage(
                     peer_id=_PEER_OFFSET + chat_id,
                     text=f"🏆 Game over! {name} wins with "
-                         f"{winner.balance} balance!",
+                    f"{winner.balance} balance!",
                 )
             )
         else:
