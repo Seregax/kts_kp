@@ -39,3 +39,16 @@ class OutgoingMessage(BaseModel):
     text: str
     keyboard: dict | None = None
     event_answer: EventAnswer | None = None
+    # When set, mailbox echoes the sent message_id back via vk_sent_callbacks
+    correlation_id: str | None = None
+    # When set, mailbox deletes this cmid (conversation message id) instead of sending
+    delete_cmid: int | None = None
+
+
+# --- vk_sent_callbacks queue (mailbox → game) ---
+
+
+class VkSentCallback(BaseModel):
+    correlation_id: str
+    peer_id: int
+    message_id: int
