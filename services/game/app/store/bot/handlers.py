@@ -37,7 +37,7 @@ def _build_join_keyboard() -> dict:
                 {
                     "action": {
                         "type": "callback",
-                        "label": "JOIN",
+                        "label": "ВСТУПИТЬ",
                         "payload": '{"action":"join"}',
                     },
                     "color": "positive",
@@ -55,7 +55,7 @@ def _build_hit_stand_keyboard(round_id: int) -> dict:
                 {
                     "action": {
                         "type": "callback",
-                        "label": "HIT",
+                        "label": "ХИТ",
                         "payload": json.dumps(
                             {"action": "hit", "round_id": round_id}
                         ),
@@ -65,7 +65,7 @@ def _build_hit_stand_keyboard(round_id: int) -> dict:
                 {
                     "action": {
                         "type": "callback",
-                        "label": "STAND",
+                        "label": "СТЕНД",
                         "payload": json.dumps(
                             {"action": "stand", "round_id": round_id}
                         ),
@@ -87,7 +87,7 @@ class LobbyHandler:
             await self.app.store.publisher.publish(
                 OutgoingMessage(
                     peer_id=_PEER_OFFSET + chat_id,
-                    text="A game is already in progress!",
+                    text="Игра уже началась!",
                 )
             )
             return
@@ -107,8 +107,8 @@ class LobbyHandler:
             OutgoingMessage(
                 peer_id=_PEER_OFFSET + chat_id,
                 text=(
-                    f"Game starting in {LOBBY_TIMEOUT}s!"
-                    " Press JOIN to participate."
+                    f"Игра начнётся через {LOBBY_TIMEOUT}с!"
+                    "  Нажмите ВСТУПИТЬ чтобы присоединится.."
                 ),
                 keyboard=_build_join_keyboard(),
                 correlation_id=str(game.id),
@@ -130,7 +130,7 @@ class LobbyHandler:
                     event_answer=EventAnswer(
                         event_id=event_id,
                         user_id=user_id,
-                        text="No active lobby!",
+                        text="Нет активных игр!",
                     ),
                 )
             )
@@ -145,7 +145,7 @@ class LobbyHandler:
                     event_answer=EventAnswer(
                         event_id=event_id,
                         user_id=user_id,
-                        text="You already joined!",
+                        text="Вы уже присоединились!",
                     ),
                 )
             )
@@ -153,22 +153,22 @@ class LobbyHandler:
 
         settings = await self.app.store.game.get_or_create_settings(chat_id)
         await self.app.store.game.get_or_create_player(
-            user_id, f"Player {user_id}"
+            user_id, f"Игрок {user_id}"
         )
         await self.app.store.game.add_player_to_game(
             game.id, user_id, settings.initial_balance
         )
 
         players = await self.app.store.game.get_game_players(game.id)
-        names = ", ".join(f"Player {gp.player_id}" for gp in players)
+        names = ", ".join(f"Игрок @id{gp.player_id}" for gp in players)
         await self.app.store.publisher.publish(
             OutgoingMessage(
                 peer_id=_PEER_OFFSET + chat_id,
-                text=f"Players in lobby: {names}",
+                text=f"Присоединились к игре: {names}",
                 event_answer=EventAnswer(
                     event_id=event_id,
                     user_id=user_id,
-                    text="You joined!",
+                    text="Вы присоединились!",
                 ),
             )
         )
@@ -211,7 +211,7 @@ class LobbyHandler:
             await self.app.store.publisher.publish(
                 OutgoingMessage(
                     peer_id=_PEER_OFFSET + chat_id,
-                    text="Not enough players joined. Game cancelled.",
+                    text="Недостаточно игроков. Игра отменена.",
                 )
             )
         else:
@@ -265,8 +265,8 @@ class RoundHandler:
         # Round start announcement
         dealer_up = format_card(dealer_hand[0])
         lines = [
-            f"🃏 Round {round_number}!",
-            f"Dealer shows: {dealer_up} [?]",
+            f"🃏 Раунд {round_number}!",
+            f"Рука дилера: {dealer_up} [?]",
             "",
         ]
         for gp in players:
@@ -297,7 +297,7 @@ class RoundHandler:
                     event_answer=EventAnswer(
                         event_id=event_id,
                         user_id=user_id,
-                        text="Not your turn!",
+                        text="Сейчас не Ваш ход!",
                     ),
                 )
             )
@@ -318,7 +318,7 @@ class RoundHandler:
                     event_answer=EventAnswer(
                         event_id=event_id,
                         user_id=user_id,
-                        text="Not your turn!",
+                        text="Сейчас не Ваш ход!",
                     ),
                 )
             )
@@ -339,9 +339,9 @@ class RoundHandler:
             await self.app.store.publisher.publish(
                 OutgoingMessage(
                     peer_id=_PEER_OFFSET + chat_id,
-                    text=f"{name} busts! {format_hand(new_hand)}",
+                    text=f"{name} перебрал! {format_hand(new_hand)}",
                     event_answer=EventAnswer(
-                        event_id=event_id, user_id=user_id, text="Bust!"
+                        event_id=event_id, user_id=user_id, text="Перебор!"
                     ),
                 )
             )
@@ -359,7 +359,7 @@ class RoundHandler:
                     event_answer=EventAnswer(
                         event_id=event_id,
                         user_id=user_id,
-                        text=f"Card: {format_card(new_card)}",
+                        text=f"Карта: {format_card(new_card)}",
                     ),
                 )
             )
@@ -382,7 +382,7 @@ class RoundHandler:
                     event_answer=EventAnswer(
                         event_id=event_id,
                         user_id=user_id,
-                        text="Not your turn!",
+                        text="Сейчас не Ваш ход!",
                     ),
                 )
             )
@@ -403,7 +403,7 @@ class RoundHandler:
                     event_answer=EventAnswer(
                         event_id=event_id,
                         user_id=user_id,
-                        text="Not your turn!",
+                        text="Сейчас не Ваш ход!",
                     ),
                 )
             )
@@ -414,7 +414,7 @@ class RoundHandler:
                 peer_id=_PEER_OFFSET + chat_id,
                 text="",
                 event_answer=EventAnswer(
-                    event_id=event_id, user_id=user_id, text="Stand!"
+                    event_id=event_id, user_id=user_id, text="СТЕНД"
                 ),
             )
         )
@@ -480,8 +480,8 @@ class RoundHandler:
 
         # Build result message
         dealer_str = format_hand(dealer_hand)
-        lines = [f"Dealer: {dealer_str}", ""]
-        outcome_labels = {"win": "WIN 🎉", "lose": "LOSE 💀", "push": "PUSH 🤝"}
+        lines = [f"Дилер: {dealer_str}", ""]
+        outcome_labels = {"win": "Победа 🎉", "lose": "Поражение 💀", "push": "Ничья 🤝"}
         for gp in fresh_players:
             result = results.get(gp.player_id, "lose")
             name = gp.player.name if gp.player else f"Player @{gp.player_id}"
@@ -494,7 +494,7 @@ class RoundHandler:
                 new_balance = gp.balance
             lines.append(
                 f"{name}: {hand_str} → "
-                f"{outcome_labels[result]}. Balance: {new_balance}"
+                f"{outcome_labels[result]}. Баланс: {new_balance}"
             )
             await self.app.store.game.update_player_balance(gp.id, new_balance)
 
@@ -553,8 +553,8 @@ class RoundHandler:
             await self.app.store.publisher.publish(
                 OutgoingMessage(
                     peer_id=_PEER_OFFSET + chat_id,
-                    text=f"🏆 Game over! {name} wins with "
-                    f"{winner.balance} balance!",
+                    text=f"🏆 Игра окончена! {name} побеждает с "
+                    f"{winner.balance} на балансе!",
                 )
             )
         else:
@@ -583,7 +583,7 @@ class RoundHandler:
             format_card(round_.dealer_hand[0]) if round_.dealer_hand else "?"
         )
         text = (
-            f"{name}'s turn:\nYour hand: {hand_str}\nDealer shows: {dealer_up}"
+            f"Ход {name}:\nВаша рука: {hand_str}\nРука дилера: {dealer_up}"
         )
         await self.app.store.publisher.publish(
             OutgoingMessage(

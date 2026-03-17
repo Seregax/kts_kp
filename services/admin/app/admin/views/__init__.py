@@ -1,5 +1,6 @@
 from aiohttp.web_exceptions import HTTPUnauthorized
 from aiohttp_session import get_session
+from aiohttp_docs import docs
 
 from app.admin.schemas import (
     AdminLoginRequest,
@@ -14,6 +15,7 @@ from app.web.utils import error_response, json_response
 
 
 class LoginView(View):
+    @docs(body_model=AdminLoginRequest, response_models={200: AdminResponse})
     async def post(self):
         data = await self.request.json()
         req = AdminLoginRequest.model_validate(data)
@@ -26,6 +28,7 @@ class LoginView(View):
 
 
 class CurrentView(View):
+    @docs()
     async def get(self):
         admin = self.request.get("admin")
         if admin is None:
