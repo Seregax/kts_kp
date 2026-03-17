@@ -1,6 +1,6 @@
 from aiohttp.web_exceptions import HTTPUnauthorized
-from aiohttp_session import get_session
 from aiohttp_docs import docs
+from aiohttp_session import get_session
 
 from app.admin.schemas import (
     AdminLoginRequest,

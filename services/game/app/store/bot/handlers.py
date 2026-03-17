@@ -481,7 +481,11 @@ class RoundHandler:
         # Build result message
         dealer_str = format_hand(dealer_hand)
         lines = [f"Дилер: {dealer_str}", ""]
-        outcome_labels = {"win": "Победа 🎉", "lose": "Поражение 💀", "push": "Ничья 🤝"}
+        outcome_labels = {
+            "win": "Победа 🎉",
+            "lose": "Поражение 💀",
+            "push": "Ничья 🤝",
+        }
         for gp in fresh_players:
             result = results.get(gp.player_id, "lose")
             name = gp.player.name if gp.player else f"Player @{gp.player_id}"
@@ -509,6 +513,7 @@ class RoundHandler:
     async def check_game_end(self, game_id: int, chat_id: int) -> None:
         settings = await self.app.store.game.get_or_create_settings(chat_id)
         players = await self.app.store.game.get_active_game_players(game_id)
+        all_players = await self.app.store.game.get_game_players(game_id)
 
         # Deactivate broke players
         for gp in players:
@@ -533,11 +538,12 @@ class RoundHandler:
         if (
             winner is None
             and len(active_players) <= 1
-            and len(active_players) != len(players)
+            and len(all_players) != 1
         ):
             winner = active_players[0] if active_players else None
-        if len(players) == 1 and active_players is None:
-            winner = players[0]
+
+        if winner is None and len(all_players) == 1 and not active_players:
+            winner = all_players[0]
 
         if winner is not None:
             name = (
@@ -582,9 +588,7 @@ class RoundHandler:
         dealer_up = (
             format_card(round_.dealer_hand[0]) if round_.dealer_hand else "?"
         )
-        text = (
-            f"Ход {name}:\nВаша рука: {hand_str}\nРука дилера: {dealer_up}"
-        )
+        text = f"Ход {name}:\nВаша рука: {hand_str}\nРука дилера: {dealer_up}"
         await self.app.store.publisher.publish(
             OutgoingMessage(
                 peer_id=_PEER_OFFSET + chat_id,
