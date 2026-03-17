@@ -484,19 +484,18 @@ class RoundHandler:
         outcome_labels = {"win": "WIN 🎉", "lose": "LOSE 💀", "push": "PUSH 🤝"}
         for gp in fresh_players:
             result = results.get(gp.player_id, "lose")
-            name = gp.player.name if gp.player else f"Player {gp.player_id}"
+            name = gp.player.name if gp.player else f"Player @{gp.player_id}"
             hand_str = format_hand(gp.hand)
-            lines.append(f"{name}: {hand_str} → {outcome_labels[result]}")
-
-        # Update balances
-        for gp in fresh_players:
-            result = results.get(gp.player_id, "lose")
             if result == "win":
                 new_balance = gp.balance + settings.bet_amount * 2
             elif result == "push":
                 new_balance = gp.balance + settings.bet_amount
             else:
                 new_balance = gp.balance
+            lines.append(
+                f"{name}: {hand_str} → "
+                f"{outcome_labels[result]}. Balance: {new_balance}"
+            )
             await self.app.store.game.update_player_balance(gp.id, new_balance)
 
         await self.app.store.publisher.publish(
@@ -531,8 +530,14 @@ class RoundHandler:
         )
 
         # Check last-player-standing
-        if winner is None and len(active_players) <= 1:
+        if (
+            winner is None
+            and len(active_players) <= 1
+            and len(active_players) != len(players)
+        ):
             winner = active_players[0] if active_players else None
+        if len(players) == 1 and active_players is None:
+            winner = players[0]
 
         if winner is not None:
             name = (
