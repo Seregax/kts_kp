@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from shared.base.base_accessor import BaseAccessor
 from shared.models.game import (
@@ -183,6 +183,22 @@ class GameAccessor(BaseAccessor):
                 )
             )
             return result.scalar_one_or_none()
+
+    async def get_round_by_id(self, round_id: int) -> GameRound | None:
+        async with self.app.database.session() as session:
+            result = await session.execute(
+                select(GameRound).where(GameRound.id == round_id)
+            )
+            return result.scalar_one_or_none()
+
+    async def get_round_count(self, game_id: int) -> int:
+        async with self.app.database.session() as session:
+            result = await session.execute(
+                select(func.count(GameRound.id)).where(
+                    GameRound.game_id == game_id
+                )
+            )
+            return result.scalar_one()
 
     async def update_round(
         self,

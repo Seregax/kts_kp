@@ -5,7 +5,7 @@ import logging
 import typing
 from datetime import datetime
 
-from app.store.bot.handlers import LobbyHandler
+from app.store.bot.handlers import LobbyHandler, RoundHandler
 from shared.base.base_accessor import BaseAccessor
 from shared.models.game import GameStatus, RoundStatus
 
@@ -29,9 +29,13 @@ class BotManager(BaseAccessor):
         # game_id → welcome message_id (populated via vk_sent_callbacks)
         self.welcome_message_ids: dict[int, int] = {}
         self._lobby = LobbyHandler(app)
+        self.round_handler = RoundHandler(app)
 
     async def connect(self, app: Application) -> None:
         await self.restore_state()
+
+    async def start_round(self, game_id: int) -> None:
+        await self.round_handler.start_round(game_id)
 
     async def handle_update(self, update: VkUpdate) -> None:
         logger.info(
@@ -64,6 +68,24 @@ class BotManager(BaseAccessor):
             await self._lobby.handle_join(
                 update.chat_id, update.user_id, update.event_id
             )
+        elif action == "hit":
+            round_id = update.payload.get("round_id")
+            if round_id is not None:
+                await self.round_handler.handle_hit(
+                    update.chat_id,
+                    int(round_id),
+                    update.user_id,
+                    update.event_id,
+                )
+        elif action == "stand":
+            round_id = update.payload.get("round_id")
+            if round_id is not None:
+                await self.round_handler.handle_stand(
+                    update.chat_id,
+                    int(round_id),
+                    update.user_id,
+                    update.event_id,
+                )
 
     async def restore_state(self) -> None:
         active_games = await self.app.store.game.get_all_active_games()
@@ -101,4 +123,7 @@ class BotManager(BaseAccessor):
                         "Found in-progress round %d for game %d",
                         current_round.id,
                         game.id,
+                    )
+                    await self.round_handler.resend_player_turn(
+                        game.chat_id, current_round
                     )

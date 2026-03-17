@@ -154,6 +154,8 @@ extend-ignore = [
     "COM819",
     "ISC001",
     "ISC002",
+    "PLR0914",
+    "SIM114"
 ]
 
 [tool.ruff.lint.extend-per-file-ignores]
@@ -198,4 +200,3 @@ filterwarnings = [
     "ignore::DeprecationWarning:pytest_asyncio.plugin.*:",
     "ignore::DeprecationWarning",
 ]
-
