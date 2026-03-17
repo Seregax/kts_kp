@@ -14,6 +14,7 @@ _DEFAULT_CONFIG = os.path.join(
 
 async def main() -> None:
     app = setup_app(config_path=os.environ.get("CONFIGPATH", _DEFAULT_CONFIG))
+    app.freeze()
     await app.startup()
     try:
         await asyncio.Event().wait()
