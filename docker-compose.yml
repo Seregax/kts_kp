@@ -1,0 +1,98 @@
+x-config: &config
+  environment:
+    CONFIGPATH: /srv/etc/config.yaml
+  volumes:
+    - ./etc/config.yaml:/srv/etc/config.yaml:ro
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kts_kp}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.migrator
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres/${POSTGRES_DB:-kts_kp}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  poller:
+    <<: *config
+    build:
+      context: .
+      dockerfile: services/poller/Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: on-failure
+
+  game:
+    <<: *config
+    build:
+      context: .
+      dockerfile: services/game/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    restart: on-failure
+
+  mailbox:
+    <<: *config
+    build:
+      context: .
+      dockerfile: services/mailbox/Dockerfile
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: on-failure
+
+  admin:
+    <<: *config
+    build:
+      context: .
+      dockerfile: services/admin/Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    restart: on-failure
+
+volumes:
+  postgres_data:

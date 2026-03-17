@@ -166,7 +166,8 @@ extend-ignore = [
 "routes.py" = ["PLC0415"]
 "urls.py" = ["PLC0415"]
 "store.py" = ["PLC0415"]
-"tests/*.py" = ["SIM300", "F403", "F405", "INP001"]
+"main.py" = ["INP001"]
+"tests/**/*.py" = ["SIM300", "F403", "F405", "INP001"]
 
 
 [tool.ruff.lint.pydocstyle]
