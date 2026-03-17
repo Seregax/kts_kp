@@ -1,15 +1,27 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import typing
 from datetime import datetime, timedelta
 
-from shared.models.game import GameStatus
+from app.store.bot.logic import (
+    dealer_should_draw,
+    format_card,
+    format_hand,
+    is_bust,
+    new_deck,
+    remaining_deck,
+    resolve_round,
+)
+from shared.models.game import GameStatus, RoundStatus
 from shared.rabbit.schemas import EventAnswer, OutgoingMessage
 
 if typing.TYPE_CHECKING:
     from aiohttp.web import Application
+
+    from shared.models.game import GamePlayer, GameRound
 
 LOBBY_TIMEOUT = 10  # seconds
 _PEER_OFFSET = 2_000_000_000
@@ -30,6 +42,36 @@ def _build_join_keyboard() -> dict:
                     },
                     "color": "positive",
                 }
+            ]
+        ],
+    }
+
+
+def _build_hit_stand_keyboard(round_id: int) -> dict:
+    return {
+        "inline": True,
+        "buttons": [
+            [
+                {
+                    "action": {
+                        "type": "callback",
+                        "label": "HIT",
+                        "payload": json.dumps(
+                            {"action": "hit", "round_id": round_id}
+                        ),
+                    },
+                    "color": "positive",
+                },
+                {
+                    "action": {
+                        "type": "callback",
+                        "label": "STAND",
+                        "payload": json.dumps(
+                            {"action": "stand", "round_id": round_id}
+                        ),
+                    },
+                    "color": "negative",
+                },
             ]
         ],
     }
@@ -160,7 +202,7 @@ class LobbyHandler:
 
         players = await self.app.store.game.get_active_game_players(game_id)
 
-        if len(players) < 2:
+        if len(players) < 1:
             await self.app.store.game.update_game_status(
                 game_id,
                 GameStatus.FINISHED,
@@ -173,17 +215,375 @@ class LobbyHandler:
                 )
             )
         else:
-            # round start will be implemented in feature/7-blackjack-logic
-            logger.info(
-                "Game %d lobby closed with %d players — starting round (stub)",
-                game_id,
-                len(players),
+            await self.app.store.bot_manager.start_round(game_id)
+
+        self.app.store.bot_manager.timers.pop(game_id, None)
+
+
+class RoundHandler:
+    def __init__(self, app: Application) -> None:
+        self.app = app
+
+    async def start_round(self, game_id: int) -> None:
+        game = await self.app.store.game.get_game_by_id(game_id)
+        if game is None:
+            return
+
+        chat_id = game.chat_id
+        settings = await self.app.store.game.get_or_create_settings(chat_id)
+        players = await self.app.store.game.get_active_game_players(game_id)
+
+        if not players:
+            return
+
+        # Transition to PLAYING on first round
+        if game.status == GameStatus.LOBBY:
+            await self.app.store.game.update_game_status(
+                game_id, GameStatus.PLAYING
+            )
+
+        round_number = await self.app.store.game.get_round_count(game_id) + 1
+        round_ = await self.app.store.game.create_round(game_id, round_number)
+
+        # Build initial deck and deal
+        deck = new_deck()
+        player_hands: dict[int, list[str]] = {}
+        for gp in players:
+            new_balance = gp.balance - settings.bet_amount
+            await self.app.store.game.update_player_balance(gp.id, new_balance)
+            hand = [deck.pop(), deck.pop()]
+            await self.app.store.game.update_player_hand(gp.id, hand)
+            player_hands[gp.player_id] = hand
+
+        dealer_hand = [deck.pop(), deck.pop()]
+        await self.app.store.game.update_round(
+            round_.id,
+            dealer_hand=dealer_hand,
+            status=RoundStatus.PLAYER_TURN,
+        )
+
+        # Round start announcement
+        dealer_up = format_card(dealer_hand[0])
+        lines = [
+            f"🃏 Round {round_number}!",
+            f"Dealer shows: {dealer_up} [?]",
+            "",
+        ]
+        for gp in players:
+            name = gp.player.name if gp.player else f"Player {gp.player_id}"
+            lines.append(f"{name}: {format_hand(player_hands[gp.player_id])}")
+        await self.app.store.publisher.publish(
+            OutgoingMessage(
+                peer_id=_PEER_OFFSET + chat_id, text="\n".join(lines)
+            )
+        )
+
+        # Re-fetch players with updated hands, then send first turn
+        fresh_players = await self.app.store.game.get_active_game_players(
+            game_id
+        )
+        fresh_round = await self.app.store.game.get_round_by_id(round_.id)
+        await self._send_player_turn(chat_id, fresh_round, fresh_players, 0)
+
+    async def handle_hit(
+        self, chat_id: int, round_id: int, user_id: int, event_id: str
+    ) -> None:
+        round_ = await self.app.store.game.get_round_by_id(round_id)
+        if round_ is None or round_.status != RoundStatus.PLAYER_TURN:
+            await self.app.store.publisher.publish(
+                OutgoingMessage(
+                    peer_id=_PEER_OFFSET + chat_id,
+                    text="",
+                    event_answer=EventAnswer(
+                        event_id=event_id,
+                        user_id=user_id,
+                        text="Not your turn!",
+                    ),
+                )
+            )
+            return
+
+        players = await self.app.store.game.get_active_game_players(
+            round_.game_id
+        )
+        if round_.current_player_index >= len(players):
+            return
+
+        current = players[round_.current_player_index]
+        if current.player_id != user_id:
+            await self.app.store.publisher.publish(
+                OutgoingMessage(
+                    peer_id=_PEER_OFFSET + chat_id,
+                    text="",
+                    event_answer=EventAnswer(
+                        event_id=event_id,
+                        user_id=user_id,
+                        text="Not your turn!",
+                    ),
+                )
+            )
+            return
+
+        # Draw a card from the remaining deck
+        all_known = list(round_.dealer_hand)
+        for gp in players:
+            all_known.extend(gp.hand)
+        deck = remaining_deck(all_known)
+        new_card = deck[0]
+
+        new_hand = [*current.hand, new_card]
+        await self.app.store.game.update_player_hand(current.id, new_hand)
+
+        name = current.player.name if current.player else f"Player {user_id}"
+        if is_bust(new_hand):
+            await self.app.store.publisher.publish(
+                OutgoingMessage(
+                    peer_id=_PEER_OFFSET + chat_id,
+                    text=f"{name} busts! {format_hand(new_hand)}",
+                    event_answer=EventAnswer(
+                        event_id=event_id, user_id=user_id, text="Bust!"
+                    ),
+                )
+            )
+            fresh_round = await self.app.store.game.get_round_by_id(round_id)
+            await self._advance_player(chat_id, fresh_round, players)
+        else:
+            fresh_round = await self.app.store.game.get_round_by_id(round_id)
+            fresh_players = await self.app.store.game.get_active_game_players(
+                round_.game_id
             )
             await self.app.store.publisher.publish(
                 OutgoingMessage(
                     peer_id=_PEER_OFFSET + chat_id,
-                    text=f"Lobby closed! {len(players)} players. Starting...",
+                    text="",
+                    event_answer=EventAnswer(
+                        event_id=event_id,
+                        user_id=user_id,
+                        text=f"Card: {format_card(new_card)}",
+                    ),
                 )
             )
+            await self._send_player_turn(
+                chat_id,
+                fresh_round,
+                fresh_players,
+                fresh_round.current_player_index,
+            )
 
-        self.app.store.bot_manager.timers.pop(game_id, None)
+    async def handle_stand(
+        self, chat_id: int, round_id: int, user_id: int, event_id: str
+    ) -> None:
+        round_ = await self.app.store.game.get_round_by_id(round_id)
+        if round_ is None or round_.status != RoundStatus.PLAYER_TURN:
+            await self.app.store.publisher.publish(
+                OutgoingMessage(
+                    peer_id=_PEER_OFFSET + chat_id,
+                    text="",
+                    event_answer=EventAnswer(
+                        event_id=event_id,
+                        user_id=user_id,
+                        text="Not your turn!",
+                    ),
+                )
+            )
+            return
+
+        players = await self.app.store.game.get_active_game_players(
+            round_.game_id
+        )
+        if round_.current_player_index >= len(players):
+            return
+
+        current = players[round_.current_player_index]
+        if current.player_id != user_id:
+            await self.app.store.publisher.publish(
+                OutgoingMessage(
+                    peer_id=_PEER_OFFSET + chat_id,
+                    text="",
+                    event_answer=EventAnswer(
+                        event_id=event_id,
+                        user_id=user_id,
+                        text="Not your turn!",
+                    ),
+                )
+            )
+            return
+
+        await self.app.store.publisher.publish(
+            OutgoingMessage(
+                peer_id=_PEER_OFFSET + chat_id,
+                text="",
+                event_answer=EventAnswer(
+                    event_id=event_id, user_id=user_id, text="Stand!"
+                ),
+            )
+        )
+        await self._advance_player(chat_id, round_, players)
+
+    async def _advance_player(
+        self,
+        chat_id: int,
+        round_: GameRound,
+        players: list[GamePlayer],
+    ) -> None:
+        next_index = round_.current_player_index + 1
+        if next_index >= len(players):
+            await self.app.store.game.update_round(
+                round_.id, status=RoundStatus.DEALER_TURN
+            )
+            fresh_round = await self.app.store.game.get_round_by_id(round_.id)
+            await self._dealer_turn(chat_id, fresh_round, players)
+        else:
+            await self.app.store.game.update_round(
+                round_.id, current_player_index=next_index
+            )
+            fresh_round = await self.app.store.game.get_round_by_id(round_.id)
+            await self._send_player_turn(
+                chat_id, fresh_round, players, next_index
+            )
+
+    async def _dealer_turn(
+        self,
+        chat_id: int,
+        round_: GameRound,
+        players: list[GamePlayer],
+    ) -> None:
+        game_id = round_.game_id
+        settings = await self.app.store.game.get_or_create_settings(chat_id)
+
+        # Refresh player hands from DB
+        fresh_players = await self.app.store.game.get_active_game_players(
+            game_id
+        )
+
+        dealer_hand = list(round_.dealer_hand)
+        all_known = list(dealer_hand)
+        for gp in fresh_players:
+            all_known.extend(gp.hand)
+
+        while dealer_should_draw(dealer_hand):
+            deck = remaining_deck(all_known)
+            card = deck[0]
+            dealer_hand.append(card)
+            all_known.append(card)
+
+        await self.app.store.game.update_round(
+            round_.id,
+            dealer_hand=dealer_hand,
+            status=RoundStatus.FINISHED,
+        )
+
+        # Resolve results
+        player_hands = {gp.player_id: gp.hand for gp in fresh_players}
+        active_ids = [gp.player_id for gp in fresh_players]
+        results = resolve_round(player_hands, dealer_hand, active_ids)
+
+        # Build result message
+        dealer_str = format_hand(dealer_hand)
+        lines = [f"Dealer: {dealer_str}", ""]
+        outcome_labels = {"win": "WIN 🎉", "lose": "LOSE 💀", "push": "PUSH 🤝"}
+        for gp in fresh_players:
+            result = results.get(gp.player_id, "lose")
+            name = gp.player.name if gp.player else f"Player {gp.player_id}"
+            hand_str = format_hand(gp.hand)
+            lines.append(f"{name}: {hand_str} → {outcome_labels[result]}")
+
+        # Update balances
+        for gp in fresh_players:
+            result = results.get(gp.player_id, "lose")
+            if result == "win":
+                new_balance = gp.balance + settings.bet_amount * 2
+            elif result == "push":
+                new_balance = gp.balance + settings.bet_amount
+            else:
+                new_balance = gp.balance
+            await self.app.store.game.update_player_balance(gp.id, new_balance)
+
+        await self.app.store.publisher.publish(
+            OutgoingMessage(
+                peer_id=_PEER_OFFSET + chat_id, text="\n".join(lines)
+            )
+        )
+
+        await self.check_game_end(game_id, chat_id)
+
+    async def check_game_end(self, game_id: int, chat_id: int) -> None:
+        settings = await self.app.store.game.get_or_create_settings(chat_id)
+        players = await self.app.store.game.get_active_game_players(game_id)
+
+        # Deactivate broke players
+        for gp in players:
+            if gp.balance <= 0:
+                await self.app.store.game.deactivate_player(gp.id)
+
+        active_players = await self.app.store.game.get_active_game_players(
+            game_id
+        )
+
+        # Check target balance winner
+        winner = next(
+            (
+                gp
+                for gp in active_players
+                if gp.balance >= settings.target_balance
+            ),
+            None,
+        )
+
+        # Check last-player-standing
+        if winner is None and len(active_players) <= 1:
+            winner = active_players[0] if active_players else None
+
+        if winner is not None:
+            name = (
+                winner.player.name
+                if winner.player
+                else f"Player {winner.player_id}"
+            )
+            await self.app.store.game.update_game_status(
+                game_id,
+                GameStatus.FINISHED,
+                finished_at=datetime.utcnow(),
+            )
+            await self.app.store.publisher.publish(
+                OutgoingMessage(
+                    peer_id=_PEER_OFFSET + chat_id,
+                    text=f"🏆 Game over! {name} wins with "
+                    f"{winner.balance} balance!",
+                )
+            )
+        else:
+            await self.start_round(game_id)
+
+    async def resend_player_turn(self, chat_id: int, round_: GameRound) -> None:
+        players = await self.app.store.game.get_active_game_players(
+            round_.game_id
+        )
+        if round_.current_player_index < len(players):
+            await self._send_player_turn(
+                chat_id, round_, players, round_.current_player_index
+            )
+
+    async def _send_player_turn(
+        self,
+        chat_id: int,
+        round_: GameRound,
+        players: list[GamePlayer],
+        index: int,
+    ) -> None:
+        gp = players[index]
+        name = gp.player.name if gp.player else f"Player {gp.player_id}"
+        hand_str = format_hand(gp.hand)
+        dealer_up = (
+            format_card(round_.dealer_hand[0]) if round_.dealer_hand else "?"
+        )
+        text = (
+            f"{name}'s turn:\nYour hand: {hand_str}\nDealer shows: {dealer_up}"
+        )
+        await self.app.store.publisher.publish(
+            OutgoingMessage(
+                peer_id=_PEER_OFFSET + chat_id,
+                text=text,
+                keyboard=_build_hit_stand_keyboard(round_.id),
+            )
+        )

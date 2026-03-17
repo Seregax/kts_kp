@@ -41,7 +41,7 @@ class VkApiAccessor(BaseAccessor):
             **params,
         }
         async with self._session.get(
-                _VK_API_URL + method, params=all_params
+            _VK_API_URL + method, params=all_params
         ) as resp:
             data = await resp.json()
         if "error" in data:
@@ -52,12 +52,11 @@ class VkApiAccessor(BaseAccessor):
         return data["response"]
 
     async def send_message(self, msg: OutgoingMessage) -> None:
-
         if msg.text or msg.keyboard is not None:
             params: dict[str, Any] = {
                 "peer_id": msg.peer_id,
                 "message": msg.text,
-                "random_id": random.randint(0, 2 ** 31),
+                "random_id": random.randint(0, 2**31),
             }
             if msg.keyboard is not None:
                 params["keyboard"] = json.dumps(msg.keyboard)
